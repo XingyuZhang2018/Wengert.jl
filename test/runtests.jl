@@ -1,4 +1,5 @@
 using Test
+using YAADE
 
 @testset "YAADE" begin
     include("test_tape.jl")
