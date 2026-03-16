@@ -1,6 +1,7 @@
 module YAADE
 
 using ChainRulesCore
+using ChainRules
 using Functors
 
 include("tape.jl")
