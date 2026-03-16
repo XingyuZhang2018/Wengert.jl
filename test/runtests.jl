@@ -1,7 +1,7 @@
 using Test
-using YAADE
+using Wengert
 
-@testset "YAADE" begin
+@testset "Wengert" begin
     include("test_tape.jl")
     include("test_tracked.jl")
     include("test_tape_ops.jl")

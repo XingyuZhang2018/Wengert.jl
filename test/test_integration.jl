@@ -1,6 +1,6 @@
 # test/test_integration.jl
 using Test
-using YAADE
+using Wengert
 import ChainRulesCore: rrule, NoTangent
 
 # --- Fake GPU array to simulate GPU tensors without CUDA ---
@@ -11,9 +11,9 @@ Base.size(x::FakeGPUArray) = size(x.data)
 Base.getindex(x::FakeGPUArray, i...) = getindex(x.data, i...)
 Base.Array(x::FakeGPUArray) = copy(x.data)
 
-# Hook YAADE's GPU detection for FakeGPUArray
-YAADE.is_gpu(x::FakeGPUArray) = true
-YAADE.to_gpu(x::Vector) = FakeGPUArray(x)
+# Hook Wengert's GPU detection for FakeGPUArray
+Wengert.is_gpu(x::FakeGPUArray) = true
+Wengert.to_gpu(x::Vector) = FakeGPUArray(x)
 
 # rrule for sum on FakeGPUArray
 function rrule(::typeof(sum), x::FakeGPUArray)
@@ -26,11 +26,11 @@ end
 
 @testset "@checkpoint offloads FakeGPUArray slots to CPU" begin
     x = FakeGPUArray([1.0, 2.0, 3.0])
-    tape = YAADE.Tape(YAADE.TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
+    tape = Wengert.Tape(Wengert.TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
 
-    YAADE.with_tape(tape) do
+    Wengert.with_tape(tape) do
         @checkpoint begin
-            slot = YAADE.push_slot!(tape, x)
+            slot = Wengert.push_slot!(tape, x)
             @test tape.slot_device[slot] == :cpu
             @test tape.slots[slot] isa Vector   # offloaded to plain Array
         end

@@ -11,7 +11,7 @@
 #
 # NOTE: the OOM test exhausts the CUDA memory pool; run it in its own process.
 
-using Test, CUDA, YAADE, Statistics, Printf
+using Test, CUDA, Wengert, Statistics, Printf
 
 CUDA.functional() || (println("No CUDA device — skipping"); exit(0))
 println("Device : ", CUDA.name(CUDA.device()))

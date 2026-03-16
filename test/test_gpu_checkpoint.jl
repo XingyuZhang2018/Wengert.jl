@@ -4,7 +4,7 @@
 
 using Test
 using CUDA
-using YAADE
+using Wengert
 import ChainRulesCore: rrule, NoTangent
 
 # Skip entire file if no GPU available
@@ -38,9 +38,9 @@ end
 
 @testset "is_gpu / to_gpu hooks loaded for CuArray" begin
     x = CUDA.ones(4)
-    @test YAADE.is_gpu(x) == true
+    @test Wengert.is_gpu(x) == true
     v = Array(x)
-    @test YAADE.to_gpu(v) isa CuArray
+    @test Wengert.to_gpu(v) isa CuArray
 end
 
 @testset "gradient without checkpoint (baseline)" begin

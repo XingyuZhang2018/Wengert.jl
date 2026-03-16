@@ -1,6 +1,6 @@
 # test/test_api.jl
 using Test
-using YAADE
+using Wengert
 using Functors
 
 @testset "pullback — scalar function of a vector" begin
