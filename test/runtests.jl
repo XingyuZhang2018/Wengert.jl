@@ -9,4 +9,5 @@ using YAADE
     include("test_checkpoint.jl")
     include("test_backward.jl")
     include("test_api.jl")
+    include("test_integration.jl")   # NEW
 end
