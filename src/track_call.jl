@@ -1,13 +1,13 @@
 using ChainRulesCore
 using ChainRulesCore: unthunk
 
-struct YAADERuleConfig <: RuleConfig{Union{}} end
+struct WengertRuleConfig <: RuleConfig{Union{}} end
 
 function track_call(f, args::Tracked...)
     tape = args[1].tape
     raw_args = map(a -> a.value, args)
 
-    result = rrule(YAADERuleConfig(), f, raw_args...)
+    result = rrule(WengertRuleConfig(), f, raw_args...)
     if result === nothing
         # No rrule — call f directly, return untracked value
         return f(raw_args...)
@@ -113,7 +113,7 @@ function Base.copy(bc::Base.Broadcast.Broadcasted{TrackedStyle})
     fully_raw = map(a -> a isa Tracked ? a.value : a, partial_args)
 
     # Step 4: try rrule for the whole broadcasted expression
-    result = rrule(YAADERuleConfig(), Base.Broadcast.broadcasted, f, fully_raw...)
+    result = rrule(WengertRuleConfig(), Base.Broadcast.broadcasted, f, fully_raw...)
     if result !== nothing
         bc_result, pb = result
         # materialize via the underlying array's broadcast (GPU-safe: uses CUDA kernels)
@@ -141,11 +141,11 @@ end
 function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
     # GPU arrays cannot be iterated element-by-element (scalar indexing is disallowed).
     # Any array arg that is a GPU array means we must skip the element-wise path.
-    has_gpu = any(a -> a isa AbstractArray && YAADE.is_gpu(a), fully_raw)
+    has_gpu = any(a -> a isa AbstractArray && is_gpu(a), fully_raw)
     if has_gpu
         # No broadcasted rrule AND GPU array — fall back to untracked execution.
         # The gradient will be missing for this op; emit a warning so the user knows.
-        @warn "YAADE: no broadcasted rrule for $f on GPU arrays — result is untracked (gradient will be zero)"
+        @warn "Wengert: no broadcasted rrule for $f on GPU arrays — result is untracked (gradient will be zero)"
         y_raw = Base.materialize(Base.Broadcast.broadcasted(f, fully_raw...))
         return y_raw
     end
@@ -158,7 +158,7 @@ function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
     test_scalars = map(fully_raw) do a
         a isa AbstractArray ? a[firstindex(a)] : a
     end
-    test_result = rrule(YAADERuleConfig(), f, test_scalars...)
+    test_result = rrule(WengertRuleConfig(), f, test_scalars...)
 
     if test_result === nothing
         # No rrule — return untracked (non-differentiable operation)
@@ -172,7 +172,7 @@ function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
         scalar_args = map(fully_raw) do a
             a isa AbstractArray ? a[idx] : a
         end
-        y_i, pb_i = rrule(YAADERuleConfig(), f, scalar_args...)
+        y_i, pb_i = rrule(WengertRuleConfig(), f, scalar_args...)
         y_vals[idx] = y_i
         elem_pbs[idx] = pb_i
     end

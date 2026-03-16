@@ -1,4 +1,4 @@
-module YAADE
+module Wengert
 
 using ChainRulesCore
 using ChainRules
