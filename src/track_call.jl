@@ -49,6 +49,7 @@ Base.sum(a::Tracked{<:AbstractArray}) = track_call(sum, a)
 struct TrackedStyle <: Base.Broadcast.BroadcastStyle end
 
 Base.Broadcast.BroadcastStyle(::Type{<:Tracked{<:AbstractArray}}) = TrackedStyle()
+Base.Broadcast.BroadcastStyle(::TrackedStyle, ::TrackedStyle) = TrackedStyle()
 Base.Broadcast.BroadcastStyle(::TrackedStyle, ::Base.Broadcast.BroadcastStyle) = TrackedStyle()
 Base.Broadcast.BroadcastStyle(::Base.Broadcast.BroadcastStyle, ::TrackedStyle) = TrackedStyle()
 
