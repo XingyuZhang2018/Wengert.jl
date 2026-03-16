@@ -1,6 +1,6 @@
-name = "YAADE"
+name = "Wengert"
 uuid = "00000000-0000-0000-0000-000000000001"
-authors = []
+authors = ["XingyuZhang2018"]
 version = "0.1.0"
 
 [deps]
@@ -10,7 +10,7 @@ ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Functors = "d9f16b24-f501-4c13-a1f2-28368ffc5196"
 
 [extensions]
-YAADECUDAExt = "CUDA"
+WengertCUDAExt = "CUDA"
 
 [compat]
 CUDA = "5, 6"
