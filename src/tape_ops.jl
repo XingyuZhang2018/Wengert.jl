@@ -1,5 +1,5 @@
 # Task-local tape — thread-safe, no global state
-const TAPE_KEY = :yaade_active_tape
+const TAPE_KEY = :wengert_active_tape
 
 current_tape() = get(task_local_storage(), TAPE_KEY, nothing)
 
