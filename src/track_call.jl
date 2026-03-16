@@ -116,7 +116,8 @@ function Base.copy(bc::Base.Broadcast.Broadcasted{TrackedStyle})
     result = rrule(YAADERuleConfig(), Base.Broadcast.broadcasted, f, fully_raw...)
     if result !== nothing
         bc_result, pb = result
-        y = collect(bc_result)
+        # materialize via the underlying array's broadcast (GPU-safe: uses CUDA kernels)
+        y = Base.materialize(bc_result)
 
         input_slots = Int[partial_args[i].slot for i in tracked_idxs]
 
@@ -138,11 +139,18 @@ function Base.copy(bc::Base.Broadcast.Broadcasted{TrackedStyle})
 end
 
 function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
-    # partial_args: may contain Tracked (from prior nested bc) or plain values
-    # fully_raw: same length, all Tracked/RefValue stripped to plain values
-    # tracked_idxs: positions in partial_args/fully_raw that are Tracked
+    # GPU arrays cannot be iterated element-by-element (scalar indexing is disallowed).
+    # Any array arg that is a GPU array means we must skip the element-wise path.
+    has_gpu = any(a -> a isa AbstractArray && YAADE.is_gpu(a), fully_raw)
+    if has_gpu
+        # No broadcasted rrule AND GPU array — fall back to untracked execution.
+        # The gradient will be missing for this op; emit a warning so the user knows.
+        @warn "YAADE: no broadcasted rrule for $f on GPU arrays — result is untracked (gradient will be zero)"
+        y_raw = Base.materialize(Base.Broadcast.broadcasted(f, fully_raw...))
+        return y_raw
+    end
 
-    # Apply broadcast on fully_raw to get output
+    # CPU path: element-wise rrule fallback
     bc_plain = Base.Broadcast.broadcasted(f, fully_raw...)
     y_raw = collect(bc_plain)
 
@@ -172,7 +180,6 @@ function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
     input_slots = Int[partial_args[i].slot for i in tracked_idxs]
 
     function elementwise_pb(ȳ)
-        # Gradient accumulators: one per tracked input
         grad_arrays = Vector{Any}(undef, length(tracked_idxs))
         for (k, ti) in enumerate(tracked_idxs)
             fa = fully_raw[ti]
@@ -182,7 +189,6 @@ function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
         ȳ_arr = ȳ isa AbstractArray ? ȳ : fill(ȳ, size(y_vals))
         for idx in eachindex(y_vals)
             raw_grads = elem_pbs[idx](ȳ_arr[idx])
-            # raw_grads = (∂f, ∂arg1, ∂arg2, ...) — one grad per arg in fully_raw
             arg_grads = raw_grads[2:end]
             for (k, ti) in enumerate(tracked_idxs)
                 g = unthunk(arg_grads[ti])
