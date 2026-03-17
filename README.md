@@ -123,21 +123,34 @@ end
 
 Without checkpointing, a tape with N layers of H×H activations requires `N × H × H × sizeof(T)` bytes of GPU memory. For H=8192, N=100 with Float32, that is 25 GB — exceeding a 24 GB GPU.
 
-Two strategies are available, with different memory/compute tradeoffs:
+Two strategies are available:
 
-| Strategy | Activation memory | Compute | When to use |
-|----------|-------------------|---------|-------------|
-| `@checkpoint expr` | CPU RAM (PCIe transfer) | 1× | CPU RAM is plentiful; PCIe bandwidth not a bottleneck |
-| `@checkpoint :recompute (vars...) block` | None | 2× | Memory-critical; cheap ops (element-wise, small matmuls) |
+| Strategy | Activation memory | Extra compute | Best when |
+|----------|-------------------|---------------|-----------|
+| `@checkpoint expr` (CPU offload) | CPU RAM via PCIe | ~1× (transfer overhead) | CPU RAM is plentiful; compute is expensive |
+| `@checkpoint :recompute (vars...) block` | None | ~2× (block reruns) | Memory-critical; ops are cheap (element-wise, small matmuls) |
 
-### Memory comparison (RTX 4090, 24 GB VRAM)
+### Memory scaling
 
-| Config | No checkpoint | CPU offload | Recompute |
-|--------|--------------|-------------|-----------|
-| H=8192, N=100 | ❌ OOM (needs 25 GB) | ✅ Fits | ✅ Fits |
-| H=4096, N=20  | ✅ ~174 ms | ✅ ~1092 ms (+528%) | ✅ ~348 ms (+100%) |
+For each checkpointed layer, activation memory is:
 
-CPU offload overhead comes from PCIe transfers (N offloads + N restores per backward pass). Recompute overhead is 2× the forward compute for checkpointed segments, with zero activation memory.
+| Strategy | GPU memory per layer | Total (N=100, H=8192, Float32) |
+|----------|---------------------|-------------------------------|
+| No checkpoint | H² × 4 B = 256 MB | **25 GB** (OOM on 24 GB GPU) |
+| CPU offload | ~0 MB on GPU (on CPU) | **~0 GB** GPU |
+| Recompute | 0 MB | **0 GB** |
+
+### Timing overhead (RTX 4090, H=4096, N=20 layers, Float32)
+
+| Strategy | Wall time | vs. no checkpoint | Source of overhead |
+|----------|-----------|-------------------|--------------------|
+| No checkpoint | ~174 ms | — | — |
+| CPU offload | ~1092 ms | **+528%** | N PCIe offloads (fwd) + N restores (bwd) |
+| Recompute | ~348 ms | **+100%** | Block recomputed once during backward |
+
+CPU offload transfers each activation over PCIe twice (once to CPU on forward, once back to GPU on backward). For large activations or many layers this dominates. Recompute avoids all transfers and holds zero activation memory, but runs the checkpointed segment twice — once on the forward pass and once on the backward pass to recover intermediates.
+
+**Rule of thumb:** prefer recompute when the checkpointed block is compute-cheap relative to its activation size (e.g. element-wise ops, layer norm, small projections). Prefer CPU offload when the block is compute-expensive and PCIe bandwidth is not a bottleneck.
 
 ## ChainRulesCore Compatibility
 
