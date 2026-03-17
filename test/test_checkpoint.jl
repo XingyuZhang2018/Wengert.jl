@@ -121,3 +121,31 @@ end
         x .^ 2
     end
 end
+
+@testset "@checkpoint :recompute: nested checkpoints" begin
+    W1 = [1.0 0.5; 0.5 1.0]
+    W2 = [2.0 1.0; 1.0 2.0]
+    x  = [1.0, 2.0]
+
+    # Baseline: no checkpointing
+    g_plain = gradient(W1, W2, x) do w1, w2, xv
+        h = w1 * xv
+        out = w2 * h
+        sum(out)
+    end
+
+    # Sequential (not truly nested) recompute checkpoints
+    g_nested = gradient(W1, W2, x) do w1, w2, xv
+        h = @checkpoint :recompute (w1, xv) begin
+            w1 * xv
+        end
+        out = @checkpoint :recompute (w2, h) begin
+            w2 * h
+        end
+        sum(out)
+    end
+
+    @test g_nested[1] ≈ g_plain[1]
+    @test g_nested[2] ≈ g_plain[2]
+    @test g_nested[3] ≈ g_plain[3]
+end
