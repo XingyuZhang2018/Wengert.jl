@@ -42,7 +42,7 @@ end
 function deep_forward_recompute(Ws, x0)
     x = x0
     for W in Ws
-        x = @checkpoint :recompute (W, x) begin
+        x = @checkpoint :recompute (x,) begin
             W * x
         end
     end

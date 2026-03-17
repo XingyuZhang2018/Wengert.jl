@@ -145,8 +145,8 @@ For each checkpointed layer, activation memory is:
 | Strategy | Wall time | vs. no checkpoint | Source of overhead |
 |----------|-----------|-------------------|--------------------|
 | No checkpoint | ~174 ms | — | — |
-| CPU offload | ~1092 ms | **+528%** | N PCIe offloads (fwd) + N restores (bwd) |
-| Recompute | ~348 ms | **+100%** | Block recomputed once during backward |
+| CPU offload | ~718 ms | **+313%** | N PCIe offloads (fwd) + N restores (bwd) |
+| Recompute | ~232 ms | **+33%** | Block recomputed once during backward |
 
 CPU offload transfers each activation over PCIe twice (once to CPU on forward, once back to GPU on backward). For large activations or many layers this dominates. Recompute avoids all transfers and holds zero activation memory, but runs the checkpointed segment twice — once on the forward pass and once on the backward pass to recover intermediates.
 
