@@ -47,8 +47,10 @@ function _recompute_segment(tape::Tape, f::Function, tracked_inputs::Tracked...)
         fresh_result = with_tape(fresh) do
             f(fresh_tracked...)
         end
+        fresh_result isa Tracked || error(
+            "_recompute_segment: block returned an untracked value on recompute re-run")
         backward!(fresh, fresh_result.slot, ȳ)
-        grads = map(ft -> get(fresh.grad_accum, ft.slot, nothing), fresh_tracked)
+        grads = map(ft -> get(fresh.grad_accum, ft.slot, ZeroTangent()), fresh_tracked)
         return (ChainRulesCore.NoTangent(), grads...)
     end
 
