@@ -75,3 +75,49 @@ end
     @test g_ckpt[1] ≈ g_plain[1]
     @test g_ckpt[2] ≈ g_plain[2]
 end
+
+@testset "@checkpoint :recompute: single-expression block" begin
+    W = [1.0 2.0; 3.0 4.0]
+    x = [0.5, 1.0]
+
+    g_plain = gradient(W, x) do w, xv
+        sum(w * xv)
+    end
+
+    g_ckpt = gradient(W, x) do w, xv
+        h = @checkpoint :recompute (w, xv) begin
+            w * xv
+        end
+        sum(h)
+    end
+
+    @test g_ckpt[1] ≈ g_plain[1]
+    @test g_ckpt[2] ≈ g_plain[2]
+end
+
+@testset "@checkpoint :recompute: multi-step block" begin
+    W = [1.0 2.0; 3.0 4.0]
+    x = [0.5, 1.0]
+
+    g_plain = gradient(W, x) do w, xv
+        tmp = w * xv
+        sum(tmp .^ 2)
+    end
+
+    g_ckpt = gradient(W, x) do w, xv
+        out = @checkpoint :recompute (w, xv) begin
+            tmp = w * xv
+            tmp .^ 2
+        end
+        sum(out)
+    end
+
+    @test g_ckpt[1] ≈ g_plain[1]
+    @test g_ckpt[2] ≈ g_plain[2]
+end
+
+@testset "@checkpoint :recompute: error outside tape context" begin
+    @test_throws ErrorException @checkpoint :recompute (x,) begin
+        x .^ 2
+    end
+end
