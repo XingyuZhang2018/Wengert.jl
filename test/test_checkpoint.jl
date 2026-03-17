@@ -1,10 +1,17 @@
 # test/test_checkpoint.jl
 using Test
 
+using ChainRulesCore
+using ChainRules
+using Functors
+
 include(joinpath(@__DIR__, "..", "src", "tape.jl"))
 include(joinpath(@__DIR__, "..", "src", "tracked.jl"))
 include(joinpath(@__DIR__, "..", "src", "tape_ops.jl"))
+include(joinpath(@__DIR__, "..", "src", "track_call.jl"))
 include(joinpath(@__DIR__, "..", "src", "checkpoint.jl"))
+include(joinpath(@__DIR__, "..", "src", "backward.jl"))
+include(joinpath(@__DIR__, "..", "src", "api.jl"))
 
 function make_empty_tape()
     Tape(TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
@@ -48,4 +55,23 @@ end
         end
     end
     @test tape.checkpoint_mode == false
+end
+
+@testset "_recompute_segment: gradient matches baseline" begin
+    W = [1.0 2.0; 3.0 4.0]
+    x = [0.5, 1.0]
+
+    # Baseline: no checkpoint
+    g_plain = gradient(W, x) do w, xv
+        sum(w * xv)
+    end
+
+    # With recompute checkpoint
+    g_ckpt = gradient(W, x) do w, xv
+        y = _recompute_segment(current_tape(), (tw, tx) -> sum(tw * tx), w, xv)
+        y
+    end
+
+    @test g_ckpt[1] ≈ g_plain[1]
+    @test g_ckpt[2] ≈ g_plain[2]
 end
