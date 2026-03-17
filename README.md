@@ -1,5 +1,9 @@
 # Wengert.jl
 
+[![CI](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/CI.yml)
+[![GPU](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/GPU.yml/badge.svg)](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/GPU.yml)
+[![Coverage](https://codecov.io/gh/XingyuZhang2018/Wengert.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/XingyuZhang2018/Wengert.jl)
+
 A tape-based reverse-mode automatic differentiation engine for Julia, with native support for **CPU gradient checkpointing** on GPU arrays.
 
 Named after Robert Edwin Wengert, who introduced the [Wengert list](https://dl.acm.org/doi/10.1145/355586.364791) (1964) — the foundational data structure used by this package.

@@ -1,0 +1,34 @@
+name: GPU
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  gpu-test:
+    name: GPU Tests (RTX 4090, self-hosted)
+    runs-on: [self-hosted, gpu]
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add Julia junction to PATH
+        shell: powershell
+        run: |
+          # Use D:\julia junction (bypasses AppData\Local domain policy restriction)
+          Add-Content -Path $env:GITHUB_PATH -Value "D:\julia\bin"
+          Write-Host "Added D:\julia\bin to PATH"
+
+      - name: Instantiate project
+        run: julia --project=. -e "using Pkg; Pkg.instantiate()"
+
+      - name: GPU checkpoint tests
+        run: julia --project=. test/test_gpu_checkpoint.jl
+
+      - name: GPU timing tests (no OOM)
+        run: julia --project=. test/test_gpu_memory_pressure.jl timing
