@@ -118,3 +118,31 @@ end
     @test g[1] isa CuArray{Float32}
     println("  Gradient type after CPU→GPU restore: ", typeof(g[1]))
 end
+
+@testset "@checkpoint :recompute on GPU: gradients match baseline" begin
+    W1 = CUDA.randn(Float32, 4, 4)
+    W2 = CUDA.randn(Float32, 4, 4)
+    x  = CUDA.randn(Float32, 4)
+    y  = CUDA.randn(Float32, 4)
+
+    g_plain = gradient(W1, W2) do w1, w2
+        h  = w1 * x
+        ŷ  = w2 * h
+        d  = ŷ .- y
+        sum(d .^ 2)
+    end
+
+    g_recompute = gradient(W1, W2) do w1, w2
+        h = @checkpoint :recompute (w1,) begin
+            w1 * x
+        end
+        ŷ  = w2 * h
+        d  = ŷ .- y
+        sum(d .^ 2)
+    end
+
+    @test Array(g_recompute[1]) ≈ Array(g_plain[1]) rtol=1e-4
+    @test Array(g_recompute[2]) ≈ Array(g_plain[2]) rtol=1e-4
+    println("  Max abs diff ∂W1 (recompute vs plain): ",
+            maximum(abs, Array(g_plain[1]) .- Array(g_recompute[1])))
+end
