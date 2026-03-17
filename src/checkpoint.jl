@@ -25,27 +25,14 @@ macro checkpoint(args...)
 
         # Extract variable symbols from the input tuple expression
         input_vars = if Meta.isexpr(input_tuple, :tuple)
-            input_tuple.args          # e.g. [:w, :xv]
+            input_tuple.args
         else
-            [input_tuple]             # single variable
+            [input_tuple]
         end
 
-        # Fresh gensym'd parameter names for the anonymous function
-        param_syms = [gensym(string("ck_", v)) for v in input_vars]
-
-        # Build the let-rebinding block using esc() on both sides so that
-        # Julia's hygiene system connects the let-bound name to the esc'd body.
-        # Concretely: `let esc(w)=p1, esc(xv)=p2; esc(body) end`
-        # The esc() on both LHS and body makes them refer to the same caller-scope
-        # symbol, so the let binding shadows the outer tracked value.
-        esc_bindings = [Expr(:(=), esc(v), p) for (v, p) in zip(input_vars, param_syms)]
-        let_bindings = length(esc_bindings) == 1 ?
-            esc_bindings[1] :
-            Expr(:block, esc_bindings...)
-
-        # Anonymous function: (p1, p2) -> let esc(w)=p1, esc(xv)=p2; esc(body) end
-        f_expr = Expr(:->, Expr(:tuple, param_syms...),
-                      Expr(:let, let_bindings, esc(body)))
+        # Build anonymous function: (esc(w), esc(xv)) -> esc(body)
+        # Using esc on both params and body ensures they refer to the same caller-scope symbols.
+        f_expr = Expr(:->, Expr(:tuple, map(esc, input_vars)...), esc(body))
 
         return quote
             local _tape = current_tape()
