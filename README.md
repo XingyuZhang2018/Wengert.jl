@@ -4,7 +4,7 @@
 [![GPU](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/GPU.yml/badge.svg)](https://github.com/XingyuZhang2018/Wengert.jl/actions/workflows/GPU.yml)
 [![Coverage](https://codecov.io/gh/XingyuZhang2018/Wengert.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/XingyuZhang2018/Wengert.jl)
 
-A tape-based reverse-mode automatic differentiation engine for Julia, with native support for **CPU gradient checkpointing** on GPU arrays.
+A tape-based reverse-mode automatic differentiation engine for Julia, with native support for **CPU gradient checkpointing** and **recompute checkpointing** on GPU arrays.
 
 Named after Robert Edwin Wengert, who introduced the [Wengert list](https://dl.acm.org/doi/10.1145/355586.364791) (1964) — the foundational data structure used by this package.
 
@@ -46,7 +46,7 @@ end
 # g[1] is ∂loss/∂W
 ```
 
-### GPU with @checkpoint
+### GPU with @checkpoint (CPU offload)
 
 ```julia
 using CUDA
@@ -61,7 +61,22 @@ g = gradient(W1, W2) do w1, w2
 end
 ```
 
-The `@checkpoint` macro offloads the result of its expression to CPU RAM immediately after computation. During backpropagation, it is automatically restored to GPU. This trades PCIe bandwidth for GPU memory.
+The `@checkpoint` macro offloads the activation to CPU RAM on the forward pass and restores it to GPU during backpropagation. This trades PCIe bandwidth for GPU memory.
+
+### GPU with @checkpoint :recompute
+
+```julia
+g = gradient(W1, W2) do w1, w2
+    h = @checkpoint :recompute (w1, x) begin
+        w1 * x          # not stored at all — recomputed during backward
+    end
+    sum(w2 * h)
+end
+```
+
+The `:recompute` mode stores **no intermediate activations**. During backpropagation the block is re-executed on a fresh tape to recover the needed values. This trades compute for memory — the block runs twice but zero activation memory is held between forward and backward.
+
+Nested recompute checkpoints work automatically.
 
 ## API Reference
 
@@ -83,28 +98,46 @@ y, back = pullback(x -> x .^ 2, randn(4))
 grads = back(ones(4))   # grads[1] = 2x
 ```
 
-### `@checkpoint expr`
+### `@checkpoint expr` — CPU offload
 
-Inside a `gradient` or `pullback` call, offloads the result of `expr` to CPU memory. On GPU arrays (`CuArray`), this performs a `Array(value)` copy on the forward pass and `CuArray(value)` on the backward pass. No-op on CPU arrays.
+Inside a `gradient` or `pullback` call, offloads the result of `expr` to CPU memory. On GPU arrays (`CuArray`), this performs an `Array(value)` copy on the forward pass and `CuArray(value)` on the backward pass. No-op on CPU arrays.
 
 ```julia
 h = @checkpoint W * x   # GPU→CPU on forward, CPU→GPU on backward
 ```
 
+### `@checkpoint :recompute (vars...) block` — recompute
+
+Runs `block` on a temporary sub-tape during the forward pass. Only the block's output is stored on the main tape; all intermediate activations inside the block are discarded. During backpropagation the block is re-executed to recover those intermediates.
+
+```julia
+h = @checkpoint :recompute (W, x) begin
+    tmp = W * x
+    relu.(tmp)      # last expression is the output
+end
+```
+
+`(W, x)` are the block's inputs — the `Tracked` values from the enclosing scope that the block depends on. The block must return exactly one tracked value (the last expression).
+
 ## GPU Checkpointing
 
-Without `@checkpoint`, a tape with N layers of H×H activations requires `N × H × H × sizeof(T)` bytes of GPU memory. For H=8192, N=100 with Float32, that is 25 GB — exceeding a 24 GB GPU.
+Without checkpointing, a tape with N layers of H×H activations requires `N × H × H × sizeof(T)` bytes of GPU memory. For H=8192, N=100 with Float32, that is 25 GB — exceeding a 24 GB GPU.
 
-With `@checkpoint`, only one activation is on GPU at a time (the current layer). Peak GPU memory usage is O(1) in depth.
+Two strategies are available, with different memory/compute tradeoffs:
+
+| Strategy | Activation memory | Compute | When to use |
+|----------|-------------------|---------|-------------|
+| `@checkpoint expr` | CPU RAM (PCIe transfer) | 1× | CPU RAM is plentiful; PCIe bandwidth not a bottleneck |
+| `@checkpoint :recompute (vars...) block` | None | 2× | Memory-critical; cheap ops (element-wise, small matmuls) |
 
 ### Memory comparison (RTX 4090, 24 GB VRAM)
 
-| Config | Without checkpoint | With @checkpoint |
-|--------|--------------------|-----------------|
-| H=8192, N=100 | ❌ OOM (needs 25 GB) | ✅ Fits |
-| H=4096, N=20  | ✅ 174 ms | ✅ 1092 ms (+528%) |
+| Config | No checkpoint | CPU offload | Recompute |
+|--------|--------------|-------------|-----------|
+| H=8192, N=100 | ❌ OOM (needs 25 GB) | ✅ Fits | ✅ Fits |
+| H=4096, N=20  | ✅ ~174 ms | ✅ ~1092 ms (+528%) | ✅ ~348 ms (+100%) |
 
-The overhead comes from 40 PCIe transfers per backward pass (20 offloads + 20 restores). For models that would otherwise OOM, this is the only option.
+CPU offload overhead comes from PCIe transfers (N offloads + N restores per backward pass). Recompute overhead is 2× the forward compute for checkpointed segments, with zero activation memory.
 
 ## ChainRulesCore Compatibility
 

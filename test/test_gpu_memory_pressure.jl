@@ -2,7 +2,8 @@
 #
 # GPU memory pressure test:
 #   Section "oom"    — Large model (H=8192, N=100, ~25 GB tape) → OOM vs checkpoint
-#   Section "timing" — Medium model (H=4096, N=20) → timing comparison (default)
+#   Section "timing" — Medium model (H=4096, N=20) → 3-way timing comparison (default)
+#                      no checkpoint | CPU checkpoint | recompute checkpoint
 #
 # Usage:
 #   julia --project=. test/test_gpu_memory_pressure.jl          # timing only
@@ -34,6 +35,17 @@ end
 function deep_forward_ckpt(Ws, x0)
     x = x0
     for W in Ws; x = @checkpoint W * x; end
+    return sum(x)
+end
+
+# Same, but each activation is discarded entirely and recomputed during backward
+function deep_forward_recompute(Ws, x0)
+    x = x0
+    for W in Ws
+        x = @checkpoint :recompute (W, x) begin
+            W * x
+        end
+    end
     return sum(x)
 end
 
@@ -122,11 +134,12 @@ if SECTION in ("timing", "all")
 
     println()
     println("=" ^ 62)
-    println("SECTION 2 — Timing: no checkpoint vs CPU checkpoint")
-    @printf "  Config      : H=%d, N=%d layers\n" H N
-    @printf "  Activation  : %.0f MB per step\n" act_MB
-    @printf "  Tape (no ck): %.0f MB on GPU\n" total_MB
-    @printf "  Tape (ckpt) : ~%.0f MB on GPU (current step only)\n" act_MB
+    println("SECTION 2 — Timing: no checkpoint vs CPU checkpoint vs recompute")
+    @printf "  Config           : H=%d, N=%d layers\n" H N
+    @printf "  Activation       : %.0f MB per step\n" act_MB
+    @printf "  Tape (no ck)     : %.0f MB on GPU\n" total_MB
+    @printf "  Tape (CPU ckpt)  : ~%.0f MB on GPU (transfers to/from CPU)\n" act_MB
+    @printf "  Tape (recompute) : ~0 MB stored  (recomputes each step on backward)\n"
     println("=" ^ 62)
 
     free_gpu()
@@ -153,22 +166,34 @@ if SECTION in ("timing", "all")
 
     @testset "Timing comparison (H=$H, N=$N, n=$NRUNS runs)" begin
         println()
-        t_plain = bench("no checkpoint",
+        t_plain     = bench("no checkpoint",
             x -> gradient(x0) do x; deep_forward(Ws, x); end, x0)
-        t_ckpt  = bench("CPU checkpoint",
+        t_ckpt      = bench("CPU checkpoint",
             x -> gradient(x0) do x; deep_forward_ckpt(Ws, x); end, x0)
+        t_recompute = bench("recompute",
+            x -> gradient(x0) do x; deep_forward_recompute(Ws, x); end, x0)
 
-        overhead_pct = (t_ckpt / t_plain - 1) * 100
-        @printf "\n  Overhead: +%.1f%%  (PCIe transfer for %d activation offload/restore cycles)\n" overhead_pct N
+        @printf "\n  CPU ckpt overhead   : %+.1f%%  (PCIe transfers: %d offload + %d restore)\n" (t_ckpt/t_plain-1)*100 N N
+        @printf "  Recompute overhead  : %+.1f%%  (recomputes %d matmuls on backward)\n" (t_recompute/t_plain-1)*100 N
+        println()
+        println("  Strategy comparison:")
+        println("    no checkpoint  — fast, high GPU memory (O(N) activations on GPU)")
+        println("    CPU checkpoint — medium overhead, medium GPU memory (activations on CPU)")
+        println("    recompute      — 2× compute, zero activation memory stored")
 
-        # Verify gradient correctness
-        g_plain = gradient(x0) do x; deep_forward(Ws, x);      end
-        g_ckpt  = gradient(x0) do x; deep_forward_ckpt(Ws, x); end
-        max_err = maximum(abs, Array(g_plain[1]) .- Array(g_ckpt[1]))
-        @printf "  Max abs error    : %.2e\n" max_err
+        # Verify gradient correctness for both checkpoint strategies
+        g_plain     = gradient(x0) do x; deep_forward(Ws, x);           end
+        g_ckpt      = gradient(x0) do x; deep_forward_ckpt(Ws, x);      end
+        g_recompute = gradient(x0) do x; deep_forward_recompute(Ws, x); end
 
-        @test Array(g_plain[1]) ≈ Array(g_ckpt[1])  rtol=1e-4
-        println("  ✓ Gradients match (rtol=1e-4)")
+        err_ckpt      = maximum(abs, Array(g_plain[1]) .- Array(g_ckpt[1]))
+        err_recompute = maximum(abs, Array(g_plain[1]) .- Array(g_recompute[1]))
+        @printf "\n  Max abs error (CPU ckpt)  : %.2e\n" err_ckpt
+        @printf "  Max abs error (recompute) : %.2e\n" err_recompute
+
+        @test Array(g_ckpt[1])      ≈ Array(g_plain[1]) rtol=1e-4
+        @test Array(g_recompute[1]) ≈ Array(g_plain[1]) rtol=1e-4
+        println("  ✓ Both checkpoint strategies match plain gradient (rtol=1e-4)")
         free_gpu()
     end
 end
