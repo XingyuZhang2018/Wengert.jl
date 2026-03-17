@@ -11,10 +11,10 @@
 #   3. GPU — single matmul gradient
 #   4. GPU — deep chain: no checkpoint vs Wengert :recompute vs Zygote.checkpointed
 #
-# Usage:
-#   julia --project=. benchmarks/bench_vs_zygote.jl          # all
-#   julia --project=. benchmarks/bench_vs_zygote.jl cpu      # CPU only
-#   julia --project=. benchmarks/bench_vs_zygote.jl gpu      # GPU only
+# Usage (from repo root):
+#   julia --project=benchmarks benchmarks/bench_vs_zygote.jl          # all
+#   julia --project=benchmarks benchmarks/bench_vs_zygote.jl cpu      # CPU only
+#   julia --project=benchmarks benchmarks/bench_vs_zygote.jl gpu      # GPU only
 
 using BenchmarkTools, Printf, Statistics
 using Wengert

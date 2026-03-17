@@ -1,0 +1,15 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+CUDA           = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Wengert        = "42a33ce9-1e22-44b5-bec4-f090074a6e82"
+Zygote         = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
+[sources]
+Wengert = {path = ".."}
+
+[compat]
+BenchmarkTools = "1"
+CUDA           = "5, 6"
+Wengert        = "0.1"
+Zygote         = "0.7"
+julia          = "1.9"
