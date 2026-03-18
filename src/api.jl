@@ -314,7 +314,17 @@ function _collect_grad_leaves!(arg, grad, leaves::Vector)
     end
 end
 
-function barrier(f, ad_pullback, args...)
+"""
+    barrier(f, ad_pullback, args...; checkpoint=:none)
+
+Record `f(args...)` as an atomic operation on the Wengert tape.
+
+Checkpoint modes:
+- `:none`      — cache ad_pullback result (fast backward, holds Zygote closure in memory)
+- `:recompute` — forward only `f(args...)`, recompute `ad_pullback` during backward (2× compute, frees Zygote closure)
+- `:cpu`       — like `:recompute`, but also offloads input arrays to CPU (frees GPU input memory + Zygote closure)
+"""
+function barrier(f, ad_pullback, args...; checkpoint::Symbol=:none)
     tape = _find_tape_in_args(args)
     tape === nothing && return f(args...)
 
@@ -325,8 +335,35 @@ function barrier(f, ad_pullback, args...)
 
     raw_args = map(deep_untrack, args)
 
-    # Single forward+pullback call — no recomputation in backward
-    result, zpb = ad_pullback(f, raw_args...)
+    if checkpoint === :none
+        # Cache zpb — fast backward, holds Zygote closure memory
+        result, zpb = ad_pullback(f, raw_args...)
+
+    elseif checkpoint === :recompute
+        # Forward only — recompute ad_pullback during backward
+        result = f(raw_args...)
+        zpb = function(tangent)
+            _, back = ad_pullback(f, raw_args...)
+            return back(tangent)
+        end
+
+    elseif checkpoint === :cpu
+        # Forward only + offload input arrays to CPU
+        result = f(raw_args...)
+        cpu_args = map(raw_args) do a
+            a isa AbstractArray && is_gpu(a) ? Array(a) : a
+        end
+        zpb = function(tangent)
+            gpu_args = map(cpu_args) do a
+                a isa Array ? to_gpu(a) : a
+            end
+            _, back = ad_pullback(f, gpu_args...)
+            return back(tangent)
+        end
+
+    else
+        error("barrier: unknown checkpoint mode :$checkpoint (use :none, :recompute, or :cpu)")
+    end
 
     return _wrap_and_record(result, tape, input_slots, zpb, raw_args)
 end
