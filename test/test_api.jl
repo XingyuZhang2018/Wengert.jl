@@ -78,3 +78,47 @@ end
     @test g[1].C ≈ 2 .* C
     @test g[1].T ≈ ones(size(T))
 end
+
+# ---------------------------------------------------------------------------
+# barrier tests
+# ---------------------------------------------------------------------------
+
+# barrier tests in isolated module to avoid name conflicts with include-based tests
+# barrier tests — use Wengert.pullback for scalar-returning functions only
+# (Wengert.pullback doesn't support tuple outputs; Zygote.pullback does)
+module BarrierTests
+using Test, Wengert, Functors
+
+@testset "barrier — scalar output" begin
+    x = [1.0, 2.0, 3.0]
+    g = Wengert.gradient(x) do v
+        Wengert.barrier(sum, Wengert.pullback, v .^ 2)
+    end
+    @test g[1] ≈ [2.0, 4.0, 6.0]
+end
+
+@testset "barrier — array output" begin
+    x = [1.0, 2.0, 3.0]
+    g = Wengert.gradient(x) do v
+        y = Wengert.barrier(a -> a .^ 2, Wengert.pullback, v)
+        sum(y)
+    end
+    @test g[1] ≈ [2.0, 4.0, 6.0]
+end
+
+@testset "barrier — chained barriers" begin
+    A = rand(3, 3)
+    g = Wengert.gradient(A) do a
+        b = Wengert.barrier(x -> x .* 2, Wengert.pullback, a)
+        Wengert.barrier(sum, Wengert.pullback, b .^ 2)
+    end
+    @test g[1] ≈ 8 .* A   # d/dA sum((2A)^2) = 8A
+end
+
+@testset "barrier — no tracked args (transparent fallback)" begin
+    x = [1.0, 2.0]
+    result = Wengert.barrier(sum, Wengert.pullback, x)
+    @test result == 3.0  # plain call, no tape
+end
+
+end # module BarrierTests

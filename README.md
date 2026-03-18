@@ -170,16 +170,49 @@ function ChainRulesCore.rrule(::ChainRulesCore.RuleConfig, ::typeof(my_fn), x)
 end
 ```
 
+### `barrier(f, ad_pullback, args...)` — external AD boundary
+
+Record `f(args...)` as an atomic operation on Wengert's tape, using an external AD backend for the backward pass. Automatically handles:
+- **Deep untracking** all args before calling `f`
+- **Wrapping outputs**: scalars, arrays, tuples, and `@functor` structs with `TrackedArray` fields
+- **Gradient routing** through struct fields via `ChainRulesCore.Tangent`
+
+```julia
+using Wengert, Zygote, Functors
+
+struct Env{CT <: AbstractArray{<:Number, 2}}
+    C::CT
+end
+@functor Env
+
+function my_step(M, env)
+    return Env(env.C .+ M), norm(M)
+end
+
+# Wengert traces the outer loop; Zygote differentiates each step
+g = gradient(M) do m
+    env = Env(zeros(3, 3))
+    for _ in 1:5
+        env, err = barrier(my_step, Zygote.pullback, m, env)
+    end
+    sum(env.C .^ 2)
+end
+```
+
+This is the key mechanism for combining Wengert with source-transformation AD systems like Zygote. Wengert handles the outer computation graph (loops, composition), while the barrier delegates differentiation of opaque functions (e.g. those using `@tensor`) to Zygote.
+
 ## Struct Support
 
-Structs are differentiable via [Functors.jl](https://github.com/FluxML/Functors.jl). Any struct with a `Functors.@functor` declaration can be passed as an argument:
+Structs are differentiable via [Functors.jl](https://github.com/FluxML/Functors.jl). Any struct with a `Functors.@functor` declaration can be passed as an argument.
+
+`TrackedArray <: AbstractArray` means tracked arrays satisfy typed field constraints, so structs with parametric fields like `C::CT where CT <: AbstractArray{<:Number, 2}` work automatically:
 
 ```julia
 using Functors
 
-struct Linear
-    W::Matrix{Float32}
-    b::Vector{Float32}
+struct Linear{W <: AbstractMatrix, B <: AbstractVector}
+    W::W
+    b::B
 end
 @functor Linear
 
@@ -187,12 +220,12 @@ model = Linear(randn(Float32, 4, 4), zeros(Float32, 4))
 g = gradient(model) do m
     sum(m.W * x .+ m.b)
 end
-# g[1] is a NamedTuple (W=..., b=...)
+# g[1] is a Linear with gradient arrays
 ```
 
 ## Implementation Notes
 
-The core data structure is the **Wengert list** (tape): a sequence of `TapeEntry` records, each storing a pullback closure, input slot indices, and an output slot index. Forward pass traces the computation graph by operator overloading on `Tracked{T}`. Backward pass replays the tape in reverse, accumulating gradients via `ChainRulesCore.add!!`.
+The core data structure is the **Wengert list** (tape): a sequence of `TapeEntry` records, each storing a pullback closure, input slot indices, and an output slot index. Forward pass traces the computation graph by operator overloading on `TrackedArray{T,N,A} <: AbstractArray{T,N}` (for arrays) and `Tracked{T}` (for scalars). Backward pass replays the tape in reverse, accumulating gradients via `ChainRulesCore.add!!`.
 
 ```
 Forward:  x → [op₁] → v₁ → [op₂] → v₂ → ... → loss
