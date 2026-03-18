@@ -307,7 +307,7 @@ function _collect_grad_leaves!(arg, grad, leaves::Vector)
                 grad
             end
             for (fname, child) in zip(fieldnames(typeof(children)), children)
-                g = try getfield(grad_children, fname) catch; nothing end
+                g = try getproperty(grad_children, fname) catch; nothing end
                 _collect_grad_leaves!(child, g, leaves)
             end
         end
