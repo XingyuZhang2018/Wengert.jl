@@ -31,6 +31,17 @@ for op in (:+, :-, :*, :/)
         Base.$op(a::AnyTracked, b::AnyTracked) = track_call($op, a, b)
         Base.$op(a::AnyTracked, b) = track_call($op, a, _ensure_tracked(b, a.tape))
         Base.$op(a, b::AnyTracked) = track_call($op, _ensure_tracked(a, b.tape), b)
+        # Resolve ambiguity: TrackedArray <: AbstractArray clashes with LinearAlgebra
+        Base.$op(a::TrackedArray, b::AbstractArray) = track_call($op, a, _ensure_tracked(b, a.tape))
+        Base.$op(a::AbstractArray, b::TrackedArray) = track_call($op, _ensure_tracked(a, b.tape), b)
+        Base.$op(a::TrackedArray, b::TrackedArray) = track_call($op, a, b)
+        # Extra disambiguation for LinearAlgebra matmul/matvec signatures
+        Base.$op(a::TrackedArray{T,2}, b::AbstractVector{S}) where {T,S} = track_call($op, a, _ensure_tracked(b, a.tape))
+        Base.$op(a::AbstractMatrix{T}, b::TrackedArray{S,1}) where {T,S} = track_call($op, _ensure_tracked(a, b.tape), b)
+        Base.$op(a::TrackedArray{T,2}, b::TrackedArray{S,1}) where {T,S} = track_call($op, a, b)
+        Base.$op(a::TrackedArray{T,2}, b::AbstractMatrix{S}) where {T,S} = track_call($op, a, _ensure_tracked(b, a.tape))
+        Base.$op(a::AbstractMatrix{T}, b::TrackedArray{S,2}) where {T,S} = track_call($op, _ensure_tracked(a, b.tape), b)
+        Base.$op(a::TrackedArray{T,2}, b::TrackedArray{S,2}) where {T,S} = track_call($op, a, b)
     end
 end
 
