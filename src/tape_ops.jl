@@ -12,8 +12,11 @@ end
 # GPU detection — returns false for plain CPU arrays
 # Can be overridden for CuArray by defining is_gpu(x::CuArray) = true
 is_gpu(x) = false
+is_gpu(x::TrackedArray) = is_gpu(x.value)  # look through TrackedArray wrapper
 
 function push_slot!(tape::Tape, value)
+    # Defensive: unwrap TrackedArray if it somehow reaches here
+    value = value isa AnyTracked ? value.value : value
     if tape.checkpoint_mode && is_gpu(value)
         cpu_val = Array(value)   # offload to CPU
         push!(tape.slots, cpu_val)
