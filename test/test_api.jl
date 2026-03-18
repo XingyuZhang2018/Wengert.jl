@@ -46,3 +46,35 @@ end
     @test g[1].a ≈ [2.0, 4.0]
     @test g[1].b ≈ [1.0, 1.0]
 end
+
+@testset "gradient — typed struct fields via TrackedArray" begin
+    struct TypedEnv{CT <: AbstractArray{<:Number, 2}}
+        C::CT
+    end
+    Functors.@functor TypedEnv
+
+    env = TypedEnv(rand(3, 3))
+    g = gradient(env) do e
+        sum(e.C .^ 2)
+    end
+    @test g[1] isa TypedEnv
+    @test g[1].C ≈ 2 .* env.C
+end
+
+@testset "gradient — multi-field typed struct via TrackedArray" begin
+    struct TwoFieldEnv{CT <: AbstractArray{<:Number, 2}, ET <: AbstractArray{<:Number, 3}}
+        C::CT
+        T::ET
+    end
+    Functors.@functor TwoFieldEnv
+
+    C = rand(4, 4)
+    T = rand(4, 3, 4)
+    env = TwoFieldEnv(C, T)
+    g = gradient(env) do e
+        sum(e.C .^ 2) + sum(e.T)
+    end
+    @test g[1] isa TwoFieldEnv
+    @test g[1].C ≈ 2 .* C
+    @test g[1].T ≈ ones(size(T))
+end

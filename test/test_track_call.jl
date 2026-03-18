@@ -12,7 +12,7 @@ function make_tape_with_slots(vals...)
     tape = Tape(TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
     tracked = map(vals) do v
         slot = push_slot!(tape, v)
-        Tracked(v, slot, tape)
+        make_tracked(v, slot, tape)
     end
     return tape, tracked...
 end
@@ -22,7 +22,7 @@ end
     result = with_tape(tape) do
         track_call(+, ta, tb)
     end
-    @test result isa Tracked
+    @test result isa AnyTracked
     @test result.value ≈ [4.0, 6.0]
     @test length(tape.entries) == 1
     entry = tape.entries[1]
@@ -35,7 +35,7 @@ end
     result = with_tape(tape) do
         ta + tb
     end
-    @test result isa Tracked
+    @test result isa AnyTracked
     @test result.value ≈ [3.0]
 end
 
@@ -44,6 +44,6 @@ end
     result = with_tape(tape) do
         ta * tb
     end
-    @test result isa Tracked
+    @test result isa AnyTracked
     @test result.value ≈ [2.0; 3.0]
 end
