@@ -14,6 +14,6 @@ include("api.jl")
 
 export Tracked, Tape
 export pullback, gradient
-export @checkpoint
+export @checkpoint, @ignore
 
 end

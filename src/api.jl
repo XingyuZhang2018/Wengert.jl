@@ -96,3 +96,14 @@ function gradient(f, args...)
     y isa Number || error("gradient: function must return a scalar, got $(typeof(y))")
     return back(one(y))
 end
+
+# ---------------------------------------------------------------------------
+# @ignore: evaluate expression but strip Tracked wrappers from the result,
+# so the output is treated as a constant by the AD system.
+# Equivalent to Zygote.@ignore.
+# ---------------------------------------------------------------------------
+macro ignore(ex)
+    quote
+        untrack($(esc(ex)))
+    end
+end
