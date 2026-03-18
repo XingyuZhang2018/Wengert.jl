@@ -1,17 +1,35 @@
 # Strip Tracked wrapper from a value
 untrack(x::Tracked) = x.value
+untrack(x::TrackedArray) = x.value
 untrack(x) = x
 
+# Recursively untrack: walk through @functor structs
+function deep_untrack(x)
+    if x isa AnyTracked
+        return x.value
+    end
+    children, re = Functors.functor(typeof(x), x)
+    if children === x
+        return x
+    end
+    untracked = map(deep_untrack, children)
+    try
+        return re(untracked)
+    catch
+        return untracked
+    end
+end
+
 # ---------------------------------------------------------------------------
-# Forward wrapping: walk arg, wrap AbstractArray leaves in Tracked.
-# For structs with @functor, return a NamedTuple (not the original struct type),
-# because typed fields cannot hold Tracked values.
-# Plain arrays are wrapped directly.
+# Forward wrapping: walk arg, wrap AbstractArray leaves in TrackedArray.
+# For structs with @functor, reconstruct the original struct type with
+# TrackedArray fields (TrackedArray <: AbstractArray satisfies type constraints).
+# Falls back to NamedTuple if reconstruction fails.
 # ---------------------------------------------------------------------------
 function _wrap_for_tracking(arg, tape)
     if arg isa AbstractArray
         slot = push_slot!(tape, arg)
-        return Tracked(arg, slot, tape)
+        return make_tracked(arg, slot, tape)
     end
     # Check if Functors knows about this type
     children, _re = Functors.functor(typeof(arg), arg)
@@ -19,11 +37,15 @@ function _wrap_for_tracking(arg, tape)
         # Not a functor — return as-is
         return arg
     end
-    # Struct with @functor: recurse into children (NamedTuple), return NamedTuple
-    # (we cannot reconstruct the original struct because its typed fields
-    #  cannot hold Tracked values)
-    return map(children) do child
+    # Struct with @functor: recurse into children, then try to reconstruct
+    tracked_children = map(children) do child
         _wrap_for_tracking(child, tape)
+    end
+    try
+        return _re(tracked_children)
+    catch
+        # Fall back to NamedTuple if reconstruction fails
+        return tracked_children
     end
 end
 
@@ -32,23 +54,27 @@ end
 # output) and extract gradients. Returns a struct matching the original arg type.
 # ---------------------------------------------------------------------------
 function _extract_grads(original_arg, tracked_arg, grad_accum)
-    if tracked_arg isa Tracked
+    if tracked_arg isa AnyTracked
         # Leaf — look up gradient
         return get(grad_accum, tracked_arg.slot, nothing)
     elseif original_arg isa AbstractArray
         # Wrapped array but somehow lost tracking
         return nothing
     end
-    # Struct case: original_arg is the struct, tracked_arg is a NamedTuple
-    # Recurse into fields and reconstruct the original struct
+    # Struct case: tracked_arg may be the reconstructed struct or a NamedTuple
     children, re = Functors.functor(typeof(original_arg), original_arg)
     if children === original_arg
         return nothing
     end
-    # tracked_arg is a NamedTuple with same field names as children
+    # Get children of tracked_arg (works for both struct and NamedTuple)
+    tracked_children, _ = Functors.functor(typeof(tracked_arg), tracked_arg)
+    if tracked_children === tracked_arg
+        # tracked_arg is not decomposable — try NamedTuple field access
+        tracked_children = tracked_arg
+    end
     grad_children = map(fieldnames(typeof(children))) do fname
         orig_child = getfield(children, fname)
-        track_child = getfield(tracked_arg, fname)
+        track_child = getfield(tracked_children, fname)
         _extract_grads(orig_child, track_child, grad_accum)
     end
     # Rebuild named tuple with field names
@@ -65,8 +91,8 @@ end
 function pullback(f, args...)
     tape = Tape(TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
 
-    # Wrap all leaf AbstractArrays in Tracked
-    # tracked_args may contain Tracked leaves or NamedTuples (for structs)
+    # Wrap all leaf AbstractArrays in TrackedArray
+    # tracked_args may contain TrackedArray leaves or reconstructed structs
     tracked_args = map(arg -> _wrap_for_tracking(arg, tape), args)
 
     # Run f with tracked inputs, recording operations onto tape
@@ -77,7 +103,7 @@ function pullback(f, args...)
     y = untrack(result)
 
     function back(ȳ)
-        if !(result isa Tracked)
+        if !(result isa AnyTracked)
             error("pullback: function output was not tracked — ensure it calls operations that have rrule")
         end
         backward!(tape, result.slot, ȳ)
@@ -104,6 +130,6 @@ end
 # ---------------------------------------------------------------------------
 macro ignore(ex)
     quote
-        untrack($(esc(ex)))
+        deep_untrack($(esc(ex)))
     end
 end

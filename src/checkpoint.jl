@@ -46,7 +46,7 @@ macro checkpoint(args...)
     end
 end
 
-function _recompute_segment(tape::Tape, f::Function, tracked_inputs::Tracked...)
+function _recompute_segment(tape::Tape, f::Function, tracked_inputs::AnyTracked...)
     raw_inputs  = map(t -> t.value, tracked_inputs)
     input_slots = Int[t.slot for t in tracked_inputs]
 
@@ -54,12 +54,12 @@ function _recompute_segment(tape::Tape, f::Function, tracked_inputs::Tracked...)
     sub = Tape(TapeEntry[], Any[], Symbol[], Dict{Int,Any}(), false)
     sub_tracked = map(raw_inputs) do v
         s = push_slot!(sub, v)
-        Tracked(v, s, sub)
+        make_tracked(v, s, sub)
     end
     result = with_tape(sub) do
         f(sub_tracked...)
     end
-    result isa Tracked || error(
+    result isa AnyTracked || error(
         "@checkpoint :recompute block must return a tracked value (did it contain any rrule-covered op?)")
     y = result.value
 
@@ -72,12 +72,12 @@ function _recompute_segment(tape::Tape, f::Function, tracked_inputs::Tracked...)
         fresh_tracked = map(input_slots) do s
             v  = tape.slots[s]
             sl = push_slot!(fresh, v)
-            Tracked(v, sl, fresh)
+            make_tracked(v, sl, fresh)
         end
         fresh_result = with_tape(fresh) do
             f(fresh_tracked...)
         end
-        fresh_result isa Tracked || error(
+        fresh_result isa AnyTracked || error(
             "_recompute_segment: block returned an untracked value on recompute re-run")
         backward!(fresh, fresh_result.slot, ȳ)
         grads = map(ft -> get(fresh.grad_accum, ft.slot, ZeroTangent()), fresh_tracked)
@@ -85,5 +85,5 @@ function _recompute_segment(tape::Tape, f::Function, tracked_inputs::Tracked...)
     end
 
     push!(tape.entries, TapeEntry(recompute_pb, input_slots, out_slot))
-    return Tracked(y, out_slot, tape)
+    return make_tracked(y, out_slot, tape)
 end

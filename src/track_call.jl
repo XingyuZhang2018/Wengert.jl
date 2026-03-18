@@ -3,7 +3,7 @@ using ChainRulesCore: unthunk
 
 struct WengertRuleConfig <: RuleConfig{Union{}} end
 
-function track_call(f, args::Tracked...)
+function track_call(f, args::AnyTracked...)
     tape = args[1].tape
     raw_args = map(a -> a.value, args)
 
@@ -16,39 +16,36 @@ function track_call(f, args::Tracked...)
 
     out_slot = push_slot!(tape, y)
     push!(tape.entries, TapeEntry(pb, Int[a.slot for a in args], out_slot))
-    return Tracked(y, out_slot, tape)
+    return make_tracked(y, out_slot, tape)
 end
 
-function _ensure_tracked(x::Tracked, tape)
-    return x
-end
-
+_ensure_tracked(x::AnyTracked, tape) = x
 function _ensure_tracked(x, tape)
     slot = push_slot!(tape, x)
-    return Tracked(x, slot, tape)
+    return make_tracked(x, slot, tape)
 end
 
 # Overload common Base operations
 for op in (:+, :-, :*, :/)
     @eval begin
-        Base.$op(a::Tracked, b::Tracked) = track_call($op, a, b)
-        Base.$op(a::Tracked, b) = track_call($op, a, _ensure_tracked(b, a.tape))
-        Base.$op(a, b::Tracked) = track_call($op, _ensure_tracked(a, b.tape), b)
+        Base.$op(a::AnyTracked, b::AnyTracked) = track_call($op, a, b)
+        Base.$op(a::AnyTracked, b) = track_call($op, a, _ensure_tracked(b, a.tape))
+        Base.$op(a, b::AnyTracked) = track_call($op, _ensure_tracked(a, b.tape), b)
     end
 end
 
-Base.:-(a::Tracked) = track_call(-, a)
+Base.:-(a::AnyTracked) = track_call(-, a)
 
 # Reduction operations
-Base.sum(a::Tracked{<:AbstractArray}) = track_call(sum, a)
+Base.sum(a::TrackedArray) = track_call(sum, a)
 
 # Scalar pass-throughs
 Base.real(x::Tracked{<:Real}) = x          # real(x::Real) = x — identity, no tape entry
-Base.real(x::Tracked)         = track_call(real, x)
+Base.real(x::AnyTracked)      = track_call(real, x)
 
 # Array rearrangement / conjugation
-Base.conj(x::Tracked{<:AbstractArray}) = track_call(conj, x)
-Base.permutedims(x::Tracked{<:AbstractArray}, perm) =
+Base.conj(x::TrackedArray) = track_call(conj, x)
+Base.permutedims(x::TrackedArray, perm) =
     track_call(permutedims, x, _ensure_tracked(perm, x.tape))
 
 # ChainRules only has scalar rules for conj (not AbstractArray).
@@ -62,7 +59,7 @@ ChainRulesCore.rrule(::typeof(conj), x::AbstractArray) =
 
 struct TrackedStyle <: Base.Broadcast.BroadcastStyle end
 
-Base.Broadcast.BroadcastStyle(::Type{<:Tracked{<:AbstractArray}}) = TrackedStyle()
+Base.Broadcast.BroadcastStyle(::Type{<:TrackedArray}) = TrackedStyle()
 Base.Broadcast.BroadcastStyle(::TrackedStyle, ::TrackedStyle) = TrackedStyle()
 Base.Broadcast.BroadcastStyle(::TrackedStyle, ::Base.Broadcast.BroadcastStyle) = TrackedStyle()
 Base.Broadcast.BroadcastStyle(::Base.Broadcast.BroadcastStyle, ::TrackedStyle) = TrackedStyle()
@@ -72,7 +69,7 @@ function _extract_broadcast_args(bc::Base.Broadcast.Broadcasted)
     return bc.args
 end
 
-function _unwrap_broadcast_arg(arg::Tracked)
+function _unwrap_broadcast_arg(arg::AnyTracked)
     return arg.value
 end
 _unwrap_broadcast_arg(arg::Base.RefValue) = arg[]
@@ -84,13 +81,13 @@ _unwrap_broadcast_arg(arg) = arg
 
 # Check if an arg is a "scalar" in broadcast (not iterated over)
 _is_broadcast_scalar(::Base.RefValue) = true
-_is_broadcast_scalar(::Tracked) = false
+_is_broadcast_scalar(::AnyTracked) = false
 _is_broadcast_scalar(x) = !(x isa AbstractArray)
 
 # Recursively find the tape from a Broadcasted expression's args
 function _find_tape(args)
     for arg in args
-        if arg isa Tracked
+        if arg isa AnyTracked
             return arg.tape
         elseif arg isa Base.Broadcast.Broadcasted
             t = _find_tape(arg.args)
@@ -101,30 +98,30 @@ function _find_tape(args)
 end
 
 function Base.copy(bc::Base.Broadcast.Broadcasted{TrackedStyle})
-    # Find the tape recursively from any Tracked argument (possibly nested)
+    # Find the tape recursively from any tracked argument (possibly nested)
     tape = _find_tape(bc.args)
-    tape === nothing && error("TrackedStyle broadcast: no Tracked argument found")
+    tape === nothing && error("TrackedStyle broadcast: no tracked argument found")
 
     f = bc.f
 
     # Step 1: "partially unwrap" — dereference RefValue and materialize nested
     # Broadcasted{TrackedStyle} (recording those sub-operations on the tape).
-    # After this step, args may contain Tracked objects (from nested bc) or plain values.
+    # After this step, args may contain tracked objects (from nested bc) or plain values.
     partial_args = map(bc.args) do arg
         if arg isa Base.RefValue
             arg[]   # dereference scalar ref
         elseif arg isa Base.Broadcast.Broadcasted{TrackedStyle}
-            Base.copy(arg)  # materialize nested broadcast, returns Tracked
+            Base.copy(arg)  # materialize nested broadcast, returns tracked
         else
-            arg  # Tracked or plain scalar/array — pass through
+            arg  # tracked or plain scalar/array — pass through
         end
     end
 
-    # Step 2: identify which partial_args are Tracked and collect their slots
-    tracked_idxs = Int[i for (i, a) in enumerate(partial_args) if a isa Tracked]
+    # Step 2: identify which partial_args are tracked and collect their slots
+    tracked_idxs = Int[i for (i, a) in enumerate(partial_args) if a isa AnyTracked]
 
     # Step 3: fully unwrap to plain values for rrule / computation
-    fully_raw = map(a -> a isa Tracked ? a.value : a, partial_args)
+    fully_raw = map(a -> a isa AnyTracked ? a.value : a, partial_args)
 
     # Step 4: try rrule for the whole broadcasted expression
     result = rrule(WengertRuleConfig(), Base.Broadcast.broadcasted, f, fully_raw...)
@@ -145,7 +142,7 @@ function Base.copy(bc::Base.Broadcast.Broadcasted{TrackedStyle})
 
         out_slot = push_slot!(tape, y)
         push!(tape.entries, TapeEntry(broadcast_pb_chainrules, input_slots, out_slot))
-        return Tracked(y, out_slot, tape)
+        return make_tracked(y, out_slot, tape)
     end
 
     # Fallback: element-wise rrule
@@ -224,5 +221,5 @@ function _broadcast_elementwise(f, partial_args, fully_raw, tracked_idxs, tape)
 
     out_slot = push_slot!(tape, y_vals)
     push!(tape.entries, TapeEntry(elementwise_pb, input_slots, out_slot))
-    return Tracked(y_vals, out_slot, tape)
+    return make_tracked(y_vals, out_slot, tape)
 end

@@ -12,7 +12,7 @@ include("backward.jl")
 include("checkpoint.jl")
 include("api.jl")
 
-export Tracked, Tape
+export Tracked, TrackedArray, AnyTracked, Tape, make_tracked
 export pullback, gradient
 export @checkpoint, @ignore
 
