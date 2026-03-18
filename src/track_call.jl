@@ -42,6 +42,20 @@ Base.:-(a::Tracked) = track_call(-, a)
 # Reduction operations
 Base.sum(a::Tracked{<:AbstractArray}) = track_call(sum, a)
 
+# Scalar pass-throughs
+Base.real(x::Tracked{<:Real}) = x          # real(x::Real) = x — identity, no tape entry
+Base.real(x::Tracked)         = track_call(real, x)
+
+# Array rearrangement / conjugation
+Base.conj(x::Tracked{<:AbstractArray}) = track_call(conj, x)
+Base.permutedims(x::Tracked{<:AbstractArray}, perm) =
+    track_call(permutedims, x, _ensure_tracked(perm, x.tape))
+
+# ChainRules only has scalar rules for conj (not AbstractArray).
+# Provide array-level rrule so track_call(conj, array) is tracked correctly.
+ChainRulesCore.rrule(::typeof(conj), x::AbstractArray) =
+    conj(x), ȳ -> (NoTangent(), conj(unthunk(ȳ)))
+
 # ---------------------------------------------------------------------------
 # Broadcast interception
 # ---------------------------------------------------------------------------
