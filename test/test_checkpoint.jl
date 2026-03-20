@@ -149,3 +149,7 @@ end
     @test g_nested[2] ≈ g_plain[2]
     @test g_nested[3] ≈ g_plain[3]
 end
+
+@testset "@checkpoint bad syntax errors" begin
+    @test_throws Exception eval(:(@checkpoint :recompute))
+end
