@@ -9,5 +9,11 @@ using Wengert
     include("test_checkpoint.jl")
     include("test_backward.jl")
     include("test_api.jl")
-    include("test_integration.jl")   # NEW
+    include("test_integration.jl")
+    include("test_coverage_tracked.jl")
+    include("test_coverage_tape_ops.jl")
+    include("test_coverage_track_call.jl")
+    include("test_coverage_api.jl")
+    include("test_coverage_checkpoint.jl")
+    include("test_coverage_module.jl")
 end
